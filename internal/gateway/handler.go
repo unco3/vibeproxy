@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"vibeproxy/internal/config"
-	"vibeproxy/internal/secret"
+	"github.com/unco3/vibeproxy/internal/config"
+	"github.com/unco3/vibeproxy/internal/secret"
 )
 
 // Gateway handles OpenAI-compatible requests and routes them to the appropriate provider.

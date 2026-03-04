@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"vibeproxy/internal/config"
+	"github.com/unco3/vibeproxy/internal/config"
 )
 
 func TestCORSDisabled(t *testing.T) {

@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"net/url"
 
-	"vibeproxy/internal/config"
-	"vibeproxy/internal/secret"
-	"vibeproxy/internal/token"
+	"github.com/unco3/vibeproxy/internal/config"
+	"github.com/unco3/vibeproxy/internal/secret"
+	"github.com/unco3/vibeproxy/internal/token"
 )
 
 // Route holds everything needed to forward a request.

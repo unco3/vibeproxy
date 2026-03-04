@@ -5,7 +5,7 @@ import (
 	"os"
 	"runtime"
 
-	"vibeproxy/internal/daemon"
+	"github.com/unco3/vibeproxy/internal/daemon"
 
 	"github.com/spf13/cobra"
 )

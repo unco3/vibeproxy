@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"vibeproxy/internal/secret"
+	"github.com/unco3/vibeproxy/internal/secret"
 
 	"github.com/spf13/cobra"
 )

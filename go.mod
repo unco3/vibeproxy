@@ -1,4 +1,4 @@
-module vibeproxy
+module github.com/unco3/vibeproxy
 
 go 1.25.6
 

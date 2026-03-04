@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"vibeproxy/internal/config"
-	"vibeproxy/internal/gateway"
-	"vibeproxy/internal/logging"
-	"vibeproxy/internal/policy"
-	"vibeproxy/internal/secret"
+	"github.com/unco3/vibeproxy/internal/config"
+	"github.com/unco3/vibeproxy/internal/gateway"
+	"github.com/unco3/vibeproxy/internal/logging"
+	"github.com/unco3/vibeproxy/internal/policy"
+	"github.com/unco3/vibeproxy/internal/secret"
 )
 
 type Server struct {

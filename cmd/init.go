@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"vibeproxy/internal/config"
-	"vibeproxy/internal/token"
+	"github.com/unco3/vibeproxy/internal/config"
+	"github.com/unco3/vibeproxy/internal/token"
 
 	"github.com/spf13/cobra"
 )

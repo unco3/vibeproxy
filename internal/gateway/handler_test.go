@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"vibeproxy/internal/config"
-	"vibeproxy/internal/secret"
+	"github.com/unco3/vibeproxy/internal/config"
+	"github.com/unco3/vibeproxy/internal/secret"
 )
 
 type mockSecrets struct {

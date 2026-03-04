@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"vibeproxy/internal/logging"
-	"vibeproxy/internal/policy"
+	"github.com/unco3/vibeproxy/internal/logging"
+	"github.com/unco3/vibeproxy/internal/policy"
 )
 
 func timeNow() time.Time { return time.Now() }

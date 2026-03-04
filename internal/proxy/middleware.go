@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"vibeproxy/internal/logging"
-	"vibeproxy/internal/policy"
+	"github.com/unco3/vibeproxy/internal/logging"
+	"github.com/unco3/vibeproxy/internal/policy"
 )
 
 // AuditMiddleware records the start time and extracts the agent identity header.

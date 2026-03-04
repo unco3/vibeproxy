@@ -9,10 +9,10 @@ import (
 	"syscall"
 	"time"
 
-	"vibeproxy/internal/config"
-	"vibeproxy/internal/daemon"
-	"vibeproxy/internal/proxy"
-	"vibeproxy/internal/secret"
+	"github.com/unco3/vibeproxy/internal/config"
+	"github.com/unco3/vibeproxy/internal/daemon"
+	"github.com/unco3/vibeproxy/internal/proxy"
+	"github.com/unco3/vibeproxy/internal/secret"
 
 	"github.com/spf13/cobra"
 )

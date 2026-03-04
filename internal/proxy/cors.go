@@ -3,7 +3,7 @@ package proxy
 import (
 	"net/http"
 
-	"vibeproxy/internal/config"
+	"github.com/unco3/vibeproxy/internal/config"
 )
 
 // corsMiddleware wraps a handler with CORS support for browser-based agent UIs.

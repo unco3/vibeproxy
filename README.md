@@ -40,7 +40,9 @@ VibeProxy is intentionally a **lightweight, single-purpose local proxy**. The fo
 ## Quick Start
 
 ```bash
-# Build
+# Clone & build
+git clone https://github.com/unco3/vibeproxy.git
+cd vibeproxy
 go build -o vibe .
 
 # Initialize project config
