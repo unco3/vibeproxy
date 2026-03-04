@@ -1,0 +1,21 @@
+services:
+  testapi:
+    target: http://127.0.0.1:9999
+    auth_header: Authorization
+    auth_scheme: Bearer
+    allowed_paths:
+      - /v1/chat
+      - /v1/embed
+    rate_limit:
+      requests_per_minute: 5
+
+  headerkey:
+    target: http://127.0.0.1:9999
+    auth_header: x-api-key
+    auth_scheme: ""
+    allowed_paths:
+      - /v1/messages
+    rate_limit:
+      requests_per_minute: 10
+
+listen: 127.0.0.1:0

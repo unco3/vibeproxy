@@ -1,0 +1,32 @@
+services:
+  openai:
+    target: https://api.openai.com
+    auth_header: Authorization
+    auth_scheme: Bearer
+    allowed_paths:
+      - /v1/chat/completions
+      - /v1/embeddings
+      - /v1/responses
+    rate_limit:
+      requests_per_minute: 60
+
+  anthropic:
+    target: https://api.anthropic.com
+    auth_header: x-api-key
+    auth_scheme: ""
+    allowed_paths:
+      - /v1/messages
+    rate_limit:
+      requests_per_minute: 60
+
+listen: 127.0.0.1:8080
+
+timeouts:
+  read_seconds: 30
+  write_seconds: 120
+  upstream_seconds: 90
+
+cors:
+  enabled: false
+  allowed_origins:
+    - http://localhost:3000

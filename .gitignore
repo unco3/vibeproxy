@@ -1,0 +1,22 @@
+# Binary
+vibe
+vibeproxy
+
+# Local config
+.vibelocal
+.env
+
+# Article drafts
+article_note.md
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go
+vendor/
