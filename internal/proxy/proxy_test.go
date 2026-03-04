@@ -69,30 +69,27 @@ func testSetup(t *testing.T, upstream *httptest.Server) (*Router, *policy.Whitel
 	return router, wl, rl, audit
 }
 
-// buildTestHandler creates the full middleware chain with a fake key (no keychain).
+// buildTestHandler creates the full middleware chain using the router's secret provider.
 func buildTestHandler(router *Router, wl *policy.Whitelist, rl *policy.RateLimiter, audit *logging.AuditLogger, realKey string) http.Handler {
-	// Terminal: reverse proxy using route from context
+	// Terminal: reverse proxy using route from context, resolves key inline
 	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		route := routeFrom(r.Context())
+		key, err := router.RealKey(route)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		rp := &httputil.ReverseProxy{
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				pr.SetURL(route.Target)
 				pr.Out.Host = route.Target.Host
-				route.Provider.InjectKey(pr.Out, realKey)
+				route.Provider.InjectKey(pr.Out, key)
 			},
 		}
 		rp.ServeHTTP(w, r)
 	})
 
-	// Build chain: same as production but with fake key middleware
-	fakeKeyMiddleware := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := withRealKey(r.Context(), realKey)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
-
-	chain := fakeKeyMiddleware(proxyHandler)
+	chain := http.Handler(proxyHandler)
 	chain = RateLimitMiddleware(rl, audit)(chain)
 	chain = WhitelistMiddleware(wl, audit)(chain)
 	chain = AuthMiddleware(router)(chain)
@@ -353,11 +350,12 @@ func TestAgentHeaderInAuditLog(t *testing.T) {
 	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		route := routeFrom(r.Context())
 		agent := agentFrom(r.Context())
+		key, _ := router.RealKey(route)
 		rp := &httputil.ReverseProxy{
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				pr.SetURL(route.Target)
 				pr.Out.Host = route.Target.Host
-				route.Provider.InjectKey(pr.Out, "sk-real")
+				route.Provider.InjectKey(pr.Out, key)
 				pr.Out.Header.Del(AgentHeader)
 			},
 			ModifyResponse: func(resp *http.Response) error {
@@ -368,13 +366,7 @@ func TestAgentHeaderInAuditLog(t *testing.T) {
 		rp.ServeHTTP(w, r)
 	})
 
-	fakeKey := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := withRealKey(r.Context(), "sk-real")
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
-	chain := fakeKey(proxyHandler)
+	chain := http.Handler(proxyHandler)
 	chain = RateLimitMiddleware(rl, audit)(chain)
 	chain = WhitelistMiddleware(wl, audit)(chain)
 	chain = AuthMiddleware(router)(chain)
@@ -482,11 +474,12 @@ func TestUpstreamErrorPassthrough(t *testing.T) {
 		route := routeFrom(r.Context())
 		agent := agentFrom(r.Context())
 		start := startTimeFrom(r.Context())
+		key, _ := router.RealKey(route)
 		rp := &httputil.ReverseProxy{
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				pr.SetURL(route.Target)
 				pr.Out.Host = route.Target.Host
-				route.Provider.InjectKey(pr.Out, "sk-real")
+				route.Provider.InjectKey(pr.Out, key)
 				pr.Out.Header.Del(AgentHeader)
 			},
 			ModifyResponse: func(resp *http.Response) error {
@@ -500,12 +493,7 @@ func TestUpstreamErrorPassthrough(t *testing.T) {
 		rp.ServeHTTP(w, r)
 	})
 
-	fakeKey := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			next.ServeHTTP(w, r.WithContext(withRealKey(r.Context(), "sk-real")))
-		})
-	}
-	chain := fakeKey(proxyHandler)
+	chain := http.Handler(proxyHandler)
 	chain = RateLimitMiddleware(rl, audit)(chain)
 	chain = WhitelistMiddleware(wl, audit)(chain)
 	chain = AuthMiddleware(router)(chain)

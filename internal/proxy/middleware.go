@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"fmt"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -83,26 +82,14 @@ func RateLimitMiddleware(limiter *policy.RateLimiter, audit *logging.AuditLogger
 	}
 }
 
-// KeyResolveMiddleware fetches the real API key from the secret provider and stores it in context.
-func KeyResolveMiddleware(router *Router, audit *logging.AuditLogger) func(http.Handler) http.Handler {
+// BodyLimitMiddleware limits the size of request bodies to prevent memory exhaustion.
+func BodyLimitMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			route := routeFrom(r.Context())
-			if route == nil {
-				errorFormatterFrom(r.Context()).WriteError(w, http.StatusInternalServerError, "internal routing error")
-				return
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024) // 10 MB
 			}
-
-			realKey, err := router.RealKey(route)
-			if err != nil {
-				slog.Error("secret lookup failed", "service", route.ServiceName, "error", err)
-				errorFormatterFrom(r.Context()).WriteError(w, http.StatusInternalServerError, "failed to retrieve API key")
-				audit.Log(route.ServiceName, r.Method, r.URL.Path, http.StatusInternalServerError, time.Since(startTimeFrom(r.Context())), agentFrom(r.Context()))
-				return
-			}
-
-			ctx := withRealKey(r.Context(), realKey)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			next.ServeHTTP(w, r)
 		})
 	}
 }

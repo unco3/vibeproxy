@@ -9,7 +9,6 @@ type contextKey int
 
 const (
 	ctxRoute contextKey = iota
-	ctxRealKey
 	ctxStartTime
 	ctxAgent
 	ctxErrorFormatter
@@ -25,15 +24,6 @@ func withRoute(ctx context.Context, route *Route) context.Context {
 func routeFrom(ctx context.Context) *Route {
 	r, _ := ctx.Value(ctxRoute).(*Route)
 	return r
-}
-
-func withRealKey(ctx context.Context, key string) context.Context {
-	return context.WithValue(ctx, ctxRealKey, key)
-}
-
-func realKeyFrom(ctx context.Context) string {
-	s, _ := ctx.Value(ctxRealKey).(string)
-	return s
 }
 
 func withStartTime(ctx context.Context, t time.Time) context.Context {

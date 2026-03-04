@@ -68,7 +68,8 @@ func TestCORSPreflightRejected(t *testing.T) {
 	}
 }
 
-func TestCORSWildcard(t *testing.T) {
+func TestCORSWildcardRejected(t *testing.T) {
+	// Wildcard "*" should NOT match any origin — it was removed as a security measure.
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -83,8 +84,8 @@ func TestCORSWildcard(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 
-	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://anything.example.com" {
-		t.Errorf("allow-origin = %q, want request origin", got)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("wildcard should not match, but got allow-origin = %q", got)
 	}
 }
 

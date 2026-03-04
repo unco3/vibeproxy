@@ -18,9 +18,18 @@ func TestServiceFrom(t *testing.T) {
 	}{
 		{"vp-local-openai", "openai", true},
 		{"vp-local-anthropic", "anthropic", true},
+		{"vp-local-my-service-1", "my-service-1", true},
 		{"vp-local-", "", false},
 		{"sk-1234", "", false},
 		{"", "", false},
+		// Reject path traversal attempts
+		{"vp-local-../../../etc/passwd", "", false},
+		// Reject uppercase (strict lowercase-only)
+		{"vp-local-OpenAI", "", false},
+		// Reject special characters
+		{"vp-local-svc name", "", false},
+		{"vp-local-svc/path", "", false},
+		{"vp-local-svc\ninjection", "", false},
 	}
 	for _, tt := range tests {
 		svc, ok := ServiceFrom(tt.tok)

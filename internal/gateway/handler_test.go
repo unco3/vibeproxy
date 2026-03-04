@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/unco3/vibeproxy/internal/config"
 	"github.com/unco3/vibeproxy/internal/secret"
@@ -31,6 +32,20 @@ func (m *mockSecrets) Name() string              { return "mock" }
 
 var _ secret.Provider = (*mockSecrets)(nil)
 
+// mockRateLimiter always allows requests.
+type mockRateLimiter struct{}
+
+func (m *mockRateLimiter) Allow(string) bool { return true }
+
+// mockAuditLogger discards log entries.
+type mockAuditLogger struct{}
+
+func (m *mockAuditLogger) Log(string, string, string, int, time.Duration, string) {}
+
+func newTestGateway(gwCfg config.GatewayConfig, services map[string]config.ServiceConfig, secrets secret.Provider) *Gateway {
+	return NewGateway(gwCfg, services, secrets, &mockRateLimiter{}, &mockAuditLogger{})
+}
+
 func TestGatewayNonStream(t *testing.T) {
 	// Mock OpenAI upstream
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +66,7 @@ func TestGatewayNonStream(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	gw := NewGateway(
+	gw := newTestGateway(
 		config.GatewayConfig{
 			Enabled: true,
 			Models:  map[string]string{"gpt-": "openai"},
@@ -72,6 +87,7 @@ func TestGatewayNonStream(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer vp-local-openai")
 	rec := httptest.NewRecorder()
 
 	gw.ServeHTTP(rec, req)
@@ -119,7 +135,7 @@ func TestGatewayAnthropicTranslation(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	gw := NewGateway(
+	gw := newTestGateway(
 		config.GatewayConfig{
 			Enabled: true,
 			Models:  map[string]string{"claude-": "anthropic"},
@@ -143,6 +159,7 @@ func TestGatewayAnthropicTranslation(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("x-api-key", "vp-local-anthropic")
 	rec := httptest.NewRecorder()
 
 	gw.ServeHTTP(rec, req)
@@ -168,7 +185,7 @@ func TestGatewayAnthropicTranslation(t *testing.T) {
 }
 
 func TestGatewayUnknownModel(t *testing.T) {
-	gw := NewGateway(
+	gw := newTestGateway(
 		config.GatewayConfig{Enabled: true, Models: map[string]string{"gpt-": "openai"}},
 		map[string]config.ServiceConfig{},
 		&mockSecrets{keys: map[string]string{}},
@@ -180,6 +197,7 @@ func TestGatewayUnknownModel(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer vp-local-openai")
 	rec := httptest.NewRecorder()
 
 	gw.ServeHTTP(rec, req)
@@ -209,7 +227,7 @@ func TestGatewayStream(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	gw := NewGateway(
+	gw := newTestGateway(
 		config.GatewayConfig{
 			Enabled: true,
 			Models:  map[string]string{"claude-": "anthropic"},
@@ -227,6 +245,7 @@ func TestGatewayStream(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("x-api-key", "vp-local-anthropic")
 	rec := httptest.NewRecorder()
 
 	gw.ServeHTTP(rec, req)
@@ -267,7 +286,7 @@ func TestGatewayStream(t *testing.T) {
 }
 
 func TestGatewayMethodNotAllowed(t *testing.T) {
-	gw := NewGateway(
+	gw := newTestGateway(
 		config.GatewayConfig{Enabled: true, Models: map[string]string{}},
 		map[string]config.ServiceConfig{},
 		&mockSecrets{keys: map[string]string{}},
@@ -291,7 +310,7 @@ func TestGatewayUpstreamError(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	gw := NewGateway(
+	gw := newTestGateway(
 		config.GatewayConfig{Enabled: true, Models: map[string]string{"gpt-": "openai"}},
 		map[string]config.ServiceConfig{
 			"openai": {Target: upstream.URL, AuthHeader: "Authorization", AuthScheme: "Bearer"},
@@ -305,11 +324,63 @@ func TestGatewayUpstreamError(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer vp-local-openai")
 	rec := httptest.NewRecorder()
 
 	gw.ServeHTTP(rec, req)
 
 	if rec.Code != 429 {
 		t.Errorf("expected 429, got %d", rec.Code)
+	}
+}
+
+func TestGatewayRejectsNoToken(t *testing.T) {
+	gw := newTestGateway(
+		config.GatewayConfig{Enabled: true, Models: map[string]string{"gpt-": "openai"}},
+		map[string]config.ServiceConfig{
+			"openai": {Target: "http://localhost:9999", AuthHeader: "Authorization", AuthScheme: "Bearer"},
+		},
+		&mockSecrets{keys: map[string]string{"openai": "key"}},
+	)
+
+	body, _ := json.Marshal(ChatRequest{
+		Model:    "gpt-4o",
+		Messages: []Message{{Role: "user", Content: "Hello"}},
+	})
+
+	// No auth header — should be rejected
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	gw.ServeHTTP(rec, req)
+
+	if rec.Code != 401 {
+		t.Errorf("expected 401 without token, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGatewayRejectsNonVibeToken(t *testing.T) {
+	gw := newTestGateway(
+		config.GatewayConfig{Enabled: true, Models: map[string]string{"gpt-": "openai"}},
+		map[string]config.ServiceConfig{
+			"openai": {Target: "http://localhost:9999", AuthHeader: "Authorization", AuthScheme: "Bearer"},
+		},
+		&mockSecrets{keys: map[string]string{"openai": "key"}},
+	)
+
+	body, _ := json.Marshal(ChatRequest{
+		Model:    "gpt-4o",
+		Messages: []Message{{Role: "user", Content: "Hello"}},
+	})
+
+	// Real-looking key instead of vp-local-* — should be rejected
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer sk-proj-realkey123")
+	rec := httptest.NewRecorder()
+
+	gw.ServeHTTP(rec, req)
+
+	if rec.Code != 401 {
+		t.Errorf("expected 401 with non-vibe token, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

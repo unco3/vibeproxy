@@ -14,11 +14,22 @@ import (
 var pidDir = filepath.Join(os.Getenv("HOME"), ".vibeproxy")
 var pidFile = filepath.Join(pidDir, "vibeproxy.pid")
 
+// WritePID atomically writes the current process PID.
+// Uses O_CREATE|O_EXCL to prevent races when multiple processes start simultaneously.
 func WritePID() error {
 	if err := os.MkdirAll(pidDir, 0700); err != nil {
 		return err
 	}
-	return os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0600)
+	f, err := os.OpenFile(pidFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("PID file already exists — another instance may be running (use 'vibe stop' first)")
+		}
+		return err
+	}
+	defer f.Close()
+	_, err = fmt.Fprintf(f, "%d", os.Getpid())
+	return err
 }
 
 func ReadPID() (int, error) {

@@ -100,7 +100,7 @@ timeouts:
 
 cors:
   enabled: false
-  allowed_origins:
+  allowed_origins:       # Wildcard "*" is not allowed
     - http://localhost:3000
 
 # Optional: secret_backend: env  (default: keychain)
@@ -131,12 +131,16 @@ ANTHROPIC_API_KEY=vp-local-anthropic
 ```
 Request
   → Localhost validation
-  → Token extraction (Authorization / x-api-key)
-  → Route resolution (token → service name via vp-local-{service} prefix)
-  → Path whitelist check
-  → Rate limit check
-  → Secret lookup (dummy → real key from secret provider)
-  → httputil.ReverseProxy → Upstream API
+  → CORS (if enabled)
+  → Audit (start time, agent identity)
+  → Body size limit (10 MB)
+  → [Gateway path] → Token validation → Rate limit → Translate → Upstream API
+  → [Proxy path]   → Token extraction (Authorization / x-api-key)
+                    → Route resolution (vp-local-{service} → service name)
+                    → Path whitelist check (with path normalization)
+                    → Rate limit check
+                    → Secret lookup (on demand, not stored in context)
+                    → httputil.ReverseProxy → Upstream API
   → Response → Audit log
 ```
 
@@ -146,12 +150,13 @@ Request
 |---|---|
 | **Token Swap** | Extracts dummy token from `Authorization` or `x-api-key` headers, resolves the real key from the secret provider, and forwards the request |
 | **Localhost Only** | Binds to `127.0.0.1` — refuses non-localhost addresses |
-| **Path Whitelist** | Only configured API paths are proxied; all others return 403 |
+| **Path Whitelist** | Only configured API paths are proxied; all others return 403. Paths are normalized (`path.Clean`) to prevent traversal attacks |
 | **Rate Limiting** | In-memory sliding window counter per service (resets on restart) |
 | **Timeout Control** | Configurable read/write/upstream timeouts to handle slow or hanging APIs |
-| **CORS** | Optional CORS support for browser-based agent UIs (disabled by default) |
+| **CORS** | Optional CORS support for browser-based agent UIs (disabled by default). Wildcard `*` origin is rejected at startup |
 | **Error Formatting** | Provider-compatible error responses (OpenAI/Anthropic SDK format) |
-| **Gateway** | Optional OpenAI-compatible universal API — route by model prefix to any provider |
+| **Gateway** | Optional OpenAI-compatible universal API — route by model prefix to any provider. Requires `vp-local-*` token, enforces rate limits and audit logging |
+| **Body Limit** | Request bodies are limited to 10 MB to prevent memory exhaustion from oversized payloads |
 | **Audit Log** | JSON Lines at `~/.vibeproxy/audit.log` — timestamps, methods, paths, status codes, durations (no secrets) |
 | **Daemon Mode** | Background process via self-re-exec with PID file at `~/.vibeproxy/vibeproxy.pid` |
 
@@ -172,10 +177,15 @@ Request
 ## Security Model
 
 - Real API keys are stored via pluggable secret providers (default: OS keychain)
-- Keys are loaded into memory on demand and never written to disk or logs
+- Keys are loaded into memory on demand, resolved inline at the point of use, and never stored in request context, disk, or logs
 - Dummy tokens (`vp-local-*`) are static identifiers, not secrets — safe to appear in logs, `.env` files, and LLM context
+- Service names in tokens are validated (lowercase alphanumeric + hyphen only) to prevent log injection
 - The proxy binds exclusively to localhost — no network exposure
-- Path whitelisting prevents access to unintended API endpoints
+- Path whitelisting with `path.Clean` normalization prevents access to unintended API endpoints and path traversal
+- Request body size is limited to 10 MB to prevent memory exhaustion
+- The gateway requires a valid `vp-local-*` dummy token, enforces rate limits, and writes audit logs — same security guarantees as the proxy path
+- CORS wildcard origin (`*`) is rejected at startup to prevent browser-based attacks against localhost
+- PID file creation uses exclusive file locking (`O_EXCL`) to prevent race conditions
 
 ## Requirements
 

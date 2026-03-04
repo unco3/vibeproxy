@@ -66,6 +66,16 @@ func Load(dir string) (*Config, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("parsing vibeproxy.yaml: %w", err)
 	}
+
+	// Reject CORS wildcard origin — it would allow any website to reach the proxy
+	if cfg.CORS.Enabled {
+		for _, o := range cfg.CORS.AllowedOrigins {
+			if o == "*" {
+				return nil, fmt.Errorf("cors: wildcard origin \"*\" is not allowed — specify explicit origins")
+			}
+		}
+	}
+
 	return &cfg, nil
 }
 

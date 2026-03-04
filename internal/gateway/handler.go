@@ -11,7 +11,11 @@ import (
 
 	"github.com/unco3/vibeproxy/internal/config"
 	"github.com/unco3/vibeproxy/internal/secret"
+	"github.com/unco3/vibeproxy/internal/token"
 )
+
+// maxRequestBodyBytes limits the size of incoming request bodies (10 MB).
+const maxRequestBodyBytes = 10 * 1024 * 1024
 
 // Gateway handles OpenAI-compatible requests and routes them to the appropriate provider.
 type Gateway struct {
@@ -19,10 +23,22 @@ type Gateway struct {
 	services    map[string]config.ServiceConfig
 	translators map[string]Translator
 	secrets     secret.Provider
+	rateLimiter RateLimiter
+	auditLogger AuditLogger
+}
+
+// RateLimiter is a subset of policy.RateLimiter used by the gateway.
+type RateLimiter interface {
+	Allow(service string) bool
+}
+
+// AuditLogger is a subset of logging.AuditLogger used by the gateway.
+type AuditLogger interface {
+	Log(service, method, path string, status int, duration time.Duration, agent string)
 }
 
 // NewGateway creates a Gateway from config.
-func NewGateway(gw config.GatewayConfig, services map[string]config.ServiceConfig, secrets secret.Provider) *Gateway {
+func NewGateway(gw config.GatewayConfig, services map[string]config.ServiceConfig, secrets secret.Provider, rl RateLimiter, audit AuditLogger) *Gateway {
 	translators := map[string]Translator{
 		"openai":    &OpenAITranslator{},
 		"anthropic": &AnthropicTranslator{},
@@ -32,14 +48,29 @@ func NewGateway(gw config.GatewayConfig, services map[string]config.ServiceConfi
 		services:    services,
 		translators: translators,
 		secrets:     secrets,
+		rateLimiter: rl,
+		auditLogger: audit,
 	}
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	agent := r.Header.Get("X-Vibe-Agent")
+
 	if r.Method != http.MethodPost {
 		writeGatewayError(w, http.StatusMethodNotAllowed, "only POST is supported")
 		return
 	}
+
+	// Validate dummy token — gateway requires a vp-local-* token
+	svcFromToken := g.extractAndValidateToken(r)
+	if svcFromToken == "" {
+		writeGatewayError(w, http.StatusUnauthorized, "missing or invalid vibeproxy token")
+		return
+	}
+
+	// Limit request body size
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 
 	var req ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -51,6 +82,13 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	svcName, err := g.resolveService(req.Model)
 	if err != nil {
 		writeGatewayError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Rate limit check
+	if !g.rateLimiter.Allow(svcName) {
+		writeGatewayError(w, http.StatusTooManyRequests, fmt.Sprintf("rate limit exceeded for service %q", svcName))
+		g.auditLogger.Log(svcName, r.Method, r.URL.Path, http.StatusTooManyRequests, time.Since(start), agent)
 		return
 	}
 
@@ -109,6 +147,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("gateway upstream error", "service", svcName, "error", err)
 		writeGatewayError(w, http.StatusBadGateway, "upstream request failed")
+		g.auditLogger.Log(svcName, r.Method, r.URL.Path, http.StatusBadGateway, time.Since(start), agent)
 		return
 	}
 	defer upResp.Body.Close()
@@ -118,6 +157,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(upResp.StatusCode)
 		io.Copy(w, upResp.Body)
+		g.auditLogger.Log(svcName, r.Method, r.URL.Path, upResp.StatusCode, time.Since(start), agent)
 		return
 	}
 
@@ -126,6 +166,27 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		g.handleNonStream(w, upResp, translator, req.Model)
 	}
+	g.auditLogger.Log(svcName, r.Method, r.URL.Path, http.StatusOK, time.Since(start), agent)
+}
+
+// extractAndValidateToken checks for a valid vp-local-* token in common auth headers.
+func (g *Gateway) extractAndValidateToken(r *http.Request) string {
+	// Check Authorization: Bearer vp-local-*
+	if auth := r.Header.Get("Authorization"); auth != "" {
+		tok := strings.TrimPrefix(auth, "Bearer ")
+		if token.IsVibeToken(tok) {
+			svc, _ := token.ServiceFrom(tok)
+			return svc
+		}
+	}
+	// Check x-api-key: vp-local-*
+	if key := r.Header.Get("x-api-key"); key != "" {
+		if token.IsVibeToken(key) {
+			svc, _ := token.ServiceFrom(key)
+			return svc
+		}
+	}
+	return ""
 }
 
 func (g *Gateway) handleNonStream(w http.ResponseWriter, upResp *http.Response, translator Translator, model string) {

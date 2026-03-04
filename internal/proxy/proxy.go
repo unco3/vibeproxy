@@ -68,37 +68,57 @@ func NewServer(cfg *config.Config, secrets secret.Provider) (*Server, error) {
 // buildChain assembles the middleware chain in execution order.
 func (s *Server) buildChain(router *Router, wl *policy.Whitelist, rl *policy.RateLimiter, audit *logging.AuditLogger, secrets secret.Provider) http.Handler {
 	// Terminal handler: reverse proxy with token swap
-	proxyHandler := s.reverseProxyHandler()
+	proxyHandler := s.reverseProxyHandler(router, secrets)
 
-	// Wrap in reverse order (outermost first in the chain)
-	chain := KeyResolveMiddleware(router, audit)(proxyHandler)
-	chain = RateLimitMiddleware(rl, audit)(chain)
-	chain = WhitelistMiddleware(wl, audit)(chain)
-	chain = AuthMiddleware(router)(chain)
+	// Proxy chain: Auth → Whitelist → RateLimit → ReverseProxy
+	proxyChain := http.Handler(proxyHandler)
+	proxyChain = RateLimitMiddleware(rl, audit)(proxyChain)
+	proxyChain = WhitelistMiddleware(wl, audit)(proxyChain)
+	proxyChain = AuthMiddleware(router)(proxyChain)
+
+	var handler http.Handler = proxyChain
+
+	// If gateway is enabled, gateway paths go to Gateway handler (has its own
+	// token validation, rate limiting, and audit logging). All other paths go
+	// through the normal proxy middleware chain.
+	if s.cfg.Gateway.Enabled {
+		gw := gateway.NewGateway(s.cfg.Gateway, s.cfg.Services, secrets, rl, audit)
+		gwPaths := make(map[string]bool, len(s.cfg.Gateway.Paths))
+		for _, p := range s.cfg.Gateway.Paths {
+			gwPaths[p] = true
+		}
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if gwPaths[r.URL.Path] {
+				gw.ServeHTTP(w, r)
+			} else {
+				proxyChain.ServeHTTP(w, r)
+			}
+		})
+	}
+
+	// Outer chain: CORS → Audit → BodyLimit → (gateway dispatch or proxy chain)
+	chain := BodyLimitMiddleware()(handler)
 	chain = AuditMiddleware(audit)(chain)
 	chain = corsMiddleware(chain, s.cfg.CORS)
-
-	// If gateway is enabled, use a mux to route gateway paths separately
-	if s.cfg.Gateway.Enabled {
-		gw := gateway.NewGateway(s.cfg.Gateway, s.cfg.Services, secrets)
-		mux := http.NewServeMux()
-		for _, path := range s.cfg.Gateway.Paths {
-			mux.Handle(path, gw)
-		}
-		mux.Handle("/", chain)
-		return mux
-	}
 
 	return chain
 }
 
 // reverseProxyHandler is the terminal handler that performs the actual proxy forwarding.
-func (s *Server) reverseProxyHandler() http.Handler {
+// It resolves the real API key inline to minimize the key's lifetime in memory.
+func (s *Server) reverseProxyHandler(router *Router, secrets secret.Provider) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		route := routeFrom(r.Context())
-		realKey := realKeyFrom(r.Context())
 		start := startTimeFrom(r.Context())
 		agent := agentFrom(r.Context())
+
+		// Resolve real key inline — never stored in context
+		realKey, err := secrets.Get(route.ServiceName)
+		if err != nil {
+			slog.Error("secret lookup failed", "service", route.ServiceName, "error", err)
+			errorFormatterFrom(r.Context()).WriteError(w, http.StatusInternalServerError, "failed to retrieve API key")
+			return
+		}
 
 		transport := &http.Transport{
 			ResponseHeaderTimeout: time.Duration(s.cfg.Timeouts.Upstream) * time.Second,

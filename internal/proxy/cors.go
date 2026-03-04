@@ -46,8 +46,5 @@ func corsMiddleware(next http.Handler, cfg config.CORSConfig) http.Handler {
 }
 
 func originAllowed(origin string, allowed map[string]bool) bool {
-	if allowed["*"] {
-		return true
-	}
 	return allowed[origin]
 }

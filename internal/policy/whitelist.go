@@ -1,6 +1,9 @@
 package policy
 
-import "strings"
+import (
+	"path"
+	"strings"
+)
 
 type Whitelist struct {
 	paths map[string]map[string]bool // service → set of allowed path prefixes
@@ -17,13 +20,15 @@ func NewWhitelist(services map[string][]string) *Whitelist {
 	return w
 }
 
-func (w *Whitelist) Allowed(service, path string) bool {
+func (w *Whitelist) Allowed(service, reqPath string) bool {
 	allowed, ok := w.paths[service]
 	if !ok {
 		return false
 	}
+	// Normalize to prevent path traversal (e.g., /v1/chat/completions/../files)
+	clean := path.Clean(reqPath)
 	for prefix := range allowed {
-		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
 			return true
 		}
 	}
